@@ -297,7 +297,36 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
     if not os.path.exists(model_path):
         print(f"Failed to find {model_path}.\n Downloading from huggingface.co")
         print(f"cacher folder is {cache_dir}, you can change it by custom_tmp_path in config.yaml")
-        if use_symlinks:
+        
+        # In offline mode, always use system HF cache to find cached files
+        if constants.HF_HUB_OFFLINE:
+            cache_dir_d = constants.HF_HUB_CACHE
+            if cache_dir_d is None:
+                import platform
+                if platform.system() == "Windows":
+                    cache_dir_d = Path(os.getenv("USERPROFILE")).joinpath(".cache", "huggingface", "hub").__str__()
+                else:
+                    cache_dir_d = os.path.join(os.getenv("HOME"), ".cache", "huggingface", "hub")
+            print(f"[Offline mode] Using HF cache: {cache_dir_d}")
+            # In offline mode, don't use local_dir, just get from cache directly
+            model_path = hf_hub_download(
+                repo_id=pretrained_model_or_path,
+                cache_dir=cache_dir_d,
+                subfolder=subfolder,
+                filename=filename,
+                local_files_only=True,
+                repo_type=repo_type
+            )
+            # Create symlink to ckpts folder for consistency
+            Path(local_dir).mkdir(parents=True, exist_ok=True)
+            target_path = Path(local_dir).joinpath(*subfolder.split('/'), filename).__str__()
+            if not os.path.exists(target_path):
+                try:
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    os.symlink(model_path, target_path)
+                except Exception as e:
+                    print(f"Failed to create symlink: {e}")
+        elif use_symlinks:
             cache_dir_d = constants.HF_HUB_CACHE    # use huggingface newer env variables `HF_HUB_CACHE`
             if cache_dir_d is None:
                 import platform
@@ -325,20 +354,30 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
                 with suppress(FileNotFoundError):
                     os.remove(os.path.join(ckpts_dir, f"linktest_{filename}.txt"))
                     os.remove(os.path.join(cache_dir_d, f"linktest_{filename}.txt"))
+            
+            model_path = hf_hub_download(repo_id=pretrained_model_or_path,
+                cache_dir=cache_dir_d,
+                local_dir=local_dir,
+                subfolder=subfolder,
+                filename=filename,
+                local_dir_use_symlinks=use_symlinks,
+                resume_download=True,
+                etag_timeout=100,
+                repo_type=repo_type
+            )
         else:
             cache_dir_d = os.path.join(cache_dir, "ckpts", pretrained_model_or_path)
 
-        model_path = hf_hub_download(repo_id=pretrained_model_or_path,
-            cache_dir=cache_dir_d,
-            local_dir=local_dir,
-            subfolder=subfolder,
-            filename=filename,
-            local_dir_use_symlinks=use_symlinks,
-            resume_download=True,
-            etag_timeout=100,
-            repo_type=repo_type
-        )
-        if not use_symlinks:
+            model_path = hf_hub_download(repo_id=pretrained_model_or_path,
+                cache_dir=cache_dir_d,
+                local_dir=local_dir,
+                subfolder=subfolder,
+                filename=filename,
+                local_dir_use_symlinks=use_symlinks,
+                resume_download=True,
+                etag_timeout=100,
+                repo_type=repo_type
+            )
             try:
                 import shutil
                 shutil.rmtree(os.path.join(cache_dir, "ckpts"))
